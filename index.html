@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>寿司郎计费器</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;500;700&display=swap');
+        
+        :root {
+            --muji-red: #A60015;
+            --muji-gray: #E2E2E2;
+            --muji-text: #333333;
+        }
+
+        body { 
+            background-color: #FFFFFF; 
+            color: var(--muji-text); 
+            font-family: 'Noto Sans SC', sans-serif;
+            -webkit-tap-highlight-color: transparent; 
+        }
+        
+        .brand-title {
+            font-weight: 700;
+            letter-spacing: 0.5em;
+            text-indent: 0.5em;
+            color: var(--muji-red);
+        }
+
+        .serif-num { font-family: 'Georgia', serif; }
+        .muji-border { border-color: var(--muji-gray); }
+        .muji-bg-red { background-color: var(--muji-red); }
+        .muji-text-red { color: var(--muji-red); }
+        
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+        input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+        
+        select {
+            appearance: none;
+            background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23A60015' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+            background-repeat: no-repeat;
+            background-position: right 0.75rem center;
+            background-size: 0.8em;
+        }
+
+        .plate-circle {
+            border: 1px solid rgba(0,0,0,0.05);
+            transition: opacity 0.2s ease;
+        }
+    </style>
+</head>
+<body class="antialiased">
+    <div id="app" class="max-w-md mx-auto min-h-screen flex flex-col p-8 md:p-12">
+        
+        <header class="mb-12 text-center">
+            <h1 class="brand-title text-lg mb-10">寿司郎计费器</h1>
+            <div class="flex border muji-border rounded-none overflow-hidden text-[10px] tracking-[0.2em]">
+                <button v-for="r in regions" :key="r.id" 
+                    @click="switchRegion(r.id)"
+                    :class="['flex-1 py-3 transition-all duration-500', currentRegion === r.id ? 'muji-bg-red text-white' : 'bg-white text-gray-400']">
+                    {{ r.name }}
+                </button>
+            </div>
+        </header>
+
+        <main class="space-y-12 flex-grow">
+            <div v-for="(plate, color) in activeConfig" :key="color" 
+                class="flex items-center justify-between group">
+                <div class="flex items-center">
+                    <div :class="['w-16 h-16 rounded-full flex items-center justify-center text-white serif-num font-bold plate-circle text-lg', plate.colorClass]">
+                        {{ currencySymbol }}{{ plate.price }}
+                    </div>
+                </div>
+                
+                <div class="flex items-center border-b muji-border pb-2 min-w-[120px] justify-end">
+                    <button @click="updatePlate(color, -1)" class="px-3 py-1 text-2xl text-gray-200 hover:text-red-800">-</button>
+                    <input type="number" 
+                        v-model.number="plates[color]" 
+                        @blur="validateInput(color)"
+                        class="w-12 text-center serif-num text-2xl font-medium focus:outline-none bg-transparent">
+                    <button @click="updatePlate(color, 1)" class="px-3 py-1 text-2xl text-gray-300 hover:text-red-800">+</button>
+                </div>
+            </div>
+
+            <div class="pt-12 border-t muji-border space-y-4">
+                <div class="flex flex-col space-y-3">
+                    <div class="flex space-x-3">
+                        <select v-model="selectedPreset" 
+                            class="flex-1 border muji-border rounded-none px-4 py-3 text-xs bg-white focus:outline-none focus:border-red-800 tracking-wider">
+                            <option v-for="opt in presets" :value="opt">{{ opt }}</option>
+                            <option value="custom">-- 自定义名称 --</option>
+                        </select>
+                        
+                        <input type="number" v-model="otherAmount" placeholder="金额" 
+                            class="w-1/3 border muji-border rounded-none px-4 py-3 text-xs focus:outline-none focus:border-red-800 text-center serif-num">
+                    </div>
+                    
+                    <input v-if="selectedPreset === 'custom'" 
+                        type="text" v-model="otherName" placeholder="请输入菜品名称" 
+                        class="w-full border muji-border rounded-none px-4 py-3 text-xs focus:outline-none focus:border-red-800 tracking-widest">
+                    
+                    <button @click="addOtherItem" 
+                        class="w-full py-4 muji-bg-red text-white text-[10px] font-bold tracking-[0.4em] active:opacity-90 transition-opacity">
+                        添加菜品
+                    </button>
+                </div>
+            </div>
+
+            <div class="mt-8">
+                <div class="text-[9px] uppercase tracking-[0.3em] text-gray-400 mb-6 font-bold flex items-center">
+                    <span class="w-8 h-px bg-gray-200 mr-2"></span>
+                    已点清单明细
+                </div>
+                <div class="max-h-64 overflow-y-auto no-scrollbar space-y-5">
+                    <div v-for="item in summaryList" :key="item.id" 
+                        class="flex justify-between items-center text-sm">
+                        <span class="text-gray-500 font-light tracking-widest text-[13px]">{{ item.name }}</span>
+                        <div class="flex items-center">
+                            <span class="serif-num font-bold mr-6 text-base">{{ currencySymbol }}{{ item.total }}</span>
+                            <button @click="removeItem(item)" class="text-gray-200 hover:text-red-800 transition-colors">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6 18L18 6M6 6l12 12" /></svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div v-if="summaryList.length === 0" class="text-center text-gray-300 py-12 text-[10px] tracking-widest font-light italic">暂无添加项目</div>
+                </div>
+            </div>
+
+            <div v-if="currentRegion === 'CN'" class="grid grid-cols-2 gap-12 pt-6">
+                <div class="flex flex-col border-b muji-border">
+                    <span class="text-[9px] text-gray-400 font-bold tracking-[0.2em] mb-2 uppercase">优惠减免 ¥</span>
+                    <div class="flex items-baseline">
+                        <input type="number" v-model.number="discountFixed" class="w-full focus:outline-none serif-num font-bold text-xl pb-1">
+                    </div>
+                </div>
+                <div class="flex flex-col border-b muji-border">
+                    <span class="text-[9px] text-gray-400 font-bold tracking-[0.2em] mb-2 uppercase">折扣比例 %</span>
+                    <div class="flex items-baseline">
+                        <input type="number" v-model.number="discountPercent" class="w-full focus:outline-none serif-num font-bold text-xl pb-1 text-right">
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <footer class="mt-20">
+            <div class="flex justify-between items-end border-t border-black pt-10 pb-20">
+                <div>
+                    <div class="text-[9px] text-gray-400 font-bold uppercase tracking-[0.3em] mb-3">预计应付总额</div>
+                    <div v-if="currentRegion !== 'CN'" class="text-[9px] muji-text-red font-bold border border-red-100 px-2 py-0.5 inline-block tracking-widest">
+                        ≈ 人民币 ¥{{ convertedTotal }}
+                    </div>
+                </div>
+                <div class="serif-num text-5xl font-bold muji-text-red tracking-tighter">
+                    {{ currencySymbol }}{{ finalTotal }}
+                </div>
+            </div>
+        </footer>
+
+    </div>
+
+    <script>
+        const { createApp, ref, computed, watch, onMounted } = Vue;
+
+        createApp({
+            setup() {
+                const currentRegion = ref('CN');
+                const plates = ref({});
+                const others = ref([]);
+                const presets = ['拉面', '茶碗蒸', '饮料', '甜品', '刺身'];
+                const selectedPreset = ref('拉面');
+                const otherName = ref('');
+                const otherAmount = ref(null);
+                const discountFixed = ref(0);
+                const discountPercent = ref(100);
+
+                const regions = [
+                    { id: 'CN', name: '中国大陆', currency: '¥', rate: 1 },
+                    { id: 'HK', name: '中国香港', currency: '$', rate: 0.92 },
+                    { id: 'JP', name: '日本地区', currency: 'Ұ', rate: 0.048 }
+                ];
+
+                const config = {
+                    CN: {
+                        white: { price: 8, colorClass: 'bg-white !text-gray-300 !border-gray-100' },
+                        red: { price: 10, colorClass: 'bg-[#A60015]' },
+                        silver: { price: 15, colorClass: 'bg-[#999999]' },
+                        gold: { price: 20, colorClass: 'bg-[#C5A059]' },
+                        black: { price: 28, colorClass: 'bg-[#222222]' }
+                    },
+                    HK: {
+                        white: { price: 10, colorClass: 'bg-white !text-gray-300 !border-gray-100' },
+                        red: { price: 12, colorClass: 'bg-[#A60015]' },
+                        silver: { price: 17, colorClass: 'bg-[#999999]' },
+                        black: { price: 27, colorClass: 'bg-[#222222]' }
+                    },
+                    JP: {
+                        yellow: { price: 120, colorClass: 'bg-[#D4B106]' },
+                        red: { price: 180, colorClass: 'bg-[#A60015]' },
+                        black: { price: 260, colorClass: 'bg-[#222222]' }
+                    }
+                };
+
+                const activeConfig = computed(() => config[currentRegion.value]);
+                const currencySymbol = computed(() => regions.find(r => r.id === currentRegion.value).currency);
+
+                const initPlates = () => {
+                    const newPlates = {};
+                    Object.keys(activeConfig.value).forEach(k => newPlates[k] = 0);
+                    plates.value = newPlates;
+                };
+
+                const switchRegion = (id) => {
+                    if (confirm('确认切换地区并清空当前账单吗？')) {
+                        currentRegion.value = id;
+                        initPlates();
+                        others.value = [];
+                        discountFixed.value = 0;
+                        discountPercent.value = 100;
+                    }
+                };
+
+                const updatePlate = (color, val) => {
+                    plates.value[color] = Math.max(0, (plates.value[color] || 0) + val);
+                };
+
+                const validateInput = (color) => {
+                    if (plates.value[color] === '' || plates.value[color] < 0) {
+                        plates.value[color] = 0;
+                    }
+                };
+
+                const addOtherItem = () => {
+                    if (otherAmount.value > 0) {
+                        const finalName = selectedPreset.value === 'custom' ? (otherName.value || '自定义项目') : selectedPreset.value;
+                        others.value.push({
+                            id: Date.now(),
+                            name: finalName,
+                            amount: otherAmount.value
+                        });
+                        otherAmount.value = null;
+                        otherName.value = '';
+                    }
+                };
+
+                const removeItem = (item) => {
+                    if (item.isOther) {
+                        others.value = others.value.filter(o => o.id !== item.id);
+                    } else {
+                        plates.value[item.color] = 0;
+                    }
+                };
+
+                const summaryList = computed(() => {
+                    const list = [];
+                    Object.entries(plates.value).forEach(([color, count]) => {
+                        if (count > 0) {
+                            list.push({
+                                id: color,
+                                color: color,
+                                name: `${color === 'white'?'白':color === 'red'?'红':color === 'silver'?'银':color === 'gold'?'金':color === 'black'?'黑':'黄'}碟 x ${count}`,
+                                total: count * activeConfig.value[color].price,
+                                isOther: false
+                            });
+                        }
+                    });
+                    others.value.forEach((item) => {
+                        list.push({
+                            id: item.id,
+                            name: item.name,
+                            total: item.amount,
+                            isOther: true
+                        });
+                    });
+                    return list;
+                });
+
+                const finalTotal = computed(() => {
+                    const subtotal = summaryList.value.reduce((sum, item) => sum + item.total, 0);
+                    let total = subtotal;
+                    if (currentRegion.value === 'CN') {
+                        total = (subtotal * (discountPercent.value / 100)) - discountFixed.value;
+                    }
+                    return Math.max(0, total).toFixed(currentRegion.value === 'JP' ? 0 : 2);
+                });
+
+                const convertedTotal = computed(() => {
+                    const rate = regions.find(r => r.id === currentRegion.value).rate;
+                    return (parseFloat(finalTotal.value) * rate).toFixed(2);
+                });
+
+                watch([currentRegion, plates, others, discountFixed, discountPercent], () => {
+                    const data = {
+                        currentRegion: currentRegion.value,
+                        plates: plates.value,
+                        others: others.value,
+                        discountFixed: discountFixed.value,
+                        discountPercent: discountPercent.value
+                    };
+                    localStorage.setItem('sushiro_vibe_final', JSON.stringify(data));
+                }, { deep: true });
+
+                onMounted(() => {
+                    const saved = localStorage.getItem('sushiro_vibe_final');
+                    if (saved) {
+                        const parsed = JSON.parse(saved);
+                        currentRegion.value = parsed.currentRegion;
+                        plates.value = parsed.plates;
+                        others.value = parsed.others;
+                        discountFixed.value = parsed.discountFixed;
+                        discountPercent.value = parsed.discountPercent;
+                    } else {
+                        initPlates();
+                    }
+                });
+
+                return {
+                    currentRegion, regions, plates, activeConfig, currencySymbol,
+                    updatePlate, validateInput, otherName, otherAmount, addOtherItem,
+                    summaryList, finalTotal, convertedTotal, switchRegion,
+                    discountFixed, discountPercent, removeItem,
+                    presets, selectedPreset
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
